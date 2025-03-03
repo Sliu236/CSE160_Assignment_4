@@ -258,6 +258,15 @@ function drawCenterCube() {
   cube.render();
 }
 
+function drawCenterSphere() {
+  let sphere = new Sphere();
+  sphere.color = [1.0, 0.5, 0.5, 1.0];
+  sphere.textureNum = g_showNormal ? -3 : 2;
+  sphere.matrix.translate(-1.5, 0.5, -3);
+  sphere.matrix.scale(1, 1, 1);
+  sphere.render();
+}
+
 function renderScene() {
   let identity = new Matrix4();
   gl.uniformMatrix4fv(u_GlobalRotateMatrix, false, identity.elements);
@@ -271,6 +280,9 @@ function renderScene() {
   
   // 画中心正方体
   drawCenterCube();
+
+  // 画中心球体
+  drawCenterSphere();
   
   // 画天空盒（应该放最后，以防止其他物体被覆盖）
   drawSky();
