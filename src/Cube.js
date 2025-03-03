@@ -10,6 +10,8 @@ class Cube {
         gl.uniform1i(u_whichTexture, this.textureNum);
         gl.uniformMatrix4fv(u_ModelMatrix, false, this.matrix.elements);
 
+        gl.uniform4f(u_FragColor, this.color[0], this.color[1], this.color[2], this.color[3]);
+
 
         // Front of the cube
         drawTriangle3DUVNormal([0,0,0, 1,1,0, 1,0,0], [0,0, 1,1, 1,0], [0,0,-1, 0,0,-1, 0,0,-1]);

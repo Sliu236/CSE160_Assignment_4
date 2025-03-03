@@ -6,6 +6,7 @@ var VSHADER_SOURCE = `
   attribute vec3 a_Normal;
   varying vec2 v_UV;
   varying vec3 v_Normal;
+  varying vec4 v_VertPos;
 
   uniform mat4 u_ModelMatrix;
   uniform mat4 u_GlobalRotateMatrix;
@@ -15,7 +16,8 @@ var VSHADER_SOURCE = `
   void main() {
     gl_Position = u_ProjectionMatrix * u_ViewMatrix * u_GlobalRotateMatrix * u_ModelMatrix * a_Position;
     v_UV = a_UV;
-    v_Normal = a_Normal; // 这里可以根据需要做 normalMatrix 变换
+    v_Normal = a_Normal;
+    v_VertPos = u_ModelMatrix * a_Position;
   }
 `;
 
@@ -26,12 +28,17 @@ var FSHADER_SOURCE = `
   varying vec3 v_Normal;
 
   uniform vec4 u_FragColor;
+  uniform vec3 u_cameraPos;
   uniform sampler2D u_Sampler0;
   uniform sampler2D u_Sampler1;
   uniform sampler2D u_Sampler2;
   uniform sampler2D u_Sampler3;
   uniform sampler2D u_Sampler4;
   uniform int u_whichTexture;
+  uniform vec3 u_LightPos;
+  varying vec4 v_VertPos;
+  uniform bool u_lightOn;
+  
 
   void main() {
     if (u_whichTexture == -2) {
@@ -58,6 +65,31 @@ var FSHADER_SOURCE = `
       // 默认红色
       gl_FragColor = vec4(1.0, 0.2, 0.2, 1.0);
     }
+
+    vec3 lightVector =u_LightPos - vec3(v_VertPos);
+    float r=length(lightVector);
+
+    // N dot L
+    vec3 L = normalize(lightVector);
+    vec3 N = normalize(v_Normal);
+    float nDotL = max(dot(N, L), 0.0);
+
+    // Reflection
+    vec3 R = reflect(-L, N);
+
+    // eye
+    vec3 E = normalize(u_cameraPos-vec3(v_VertPos));
+
+    // specular
+    float specular = pow(max(dot(E, R), 0.0), 50.0) * 0.8;
+    
+
+    vec3 lightColor = vec3(1.0, 0.8, 0.6);
+
+    vec3 diffuse = lightColor * nDotL * 0.7;
+    vec3 ambient = vec3(gl_FragColor) * 0.2;
+    vec3 specularColor = lightColor * specular * 1.5;
+    gl_FragColor = vec4(diffuse + ambient + specularColor, 1.0);
   }
 `;
 
@@ -67,6 +99,7 @@ let u_FragColor, u_ModelMatrix, u_ProjectionMatrix, u_GlobalRotateMatrix, u_View
 let u_whichTexture;
 let u_Sampler0, u_Sampler1, u_Sampler2, u_Sampler3, u_Sampler4;
 
+
 let camera;
 let g_showNormal = false;  // 是否开启法线可视化
 let g_mouseDragging = false;
@@ -75,6 +108,12 @@ let g_lastMouseY = 0;
 
 let lastFrameTime = performance.now();
 const MOUSE_SENSITIVITY = 0.002;
+
+let g_lightPos = [0, 1, -2]; // 光源位置
+let u_cameraPos;
+
+let g_yellowAnimation = false;
+let g_megentaAnimation = false;
 
 // 初始化 WebGL
 function setupWebGL() {
@@ -104,6 +143,8 @@ function connectVariablesToGLSL() {
   u_ViewMatrix = gl.getUniformLocation(gl.program, 'u_ViewMatrix');
   u_ProjectionMatrix = gl.getUniformLocation(gl.program, 'u_ProjectionMatrix');
   u_whichTexture = gl.getUniformLocation(gl.program, 'u_whichTexture');
+  u_LightPos = gl.getUniformLocation(gl.program, 'u_LightPos');
+  u_cameraPos = gl.getUniformLocation(gl.program, 'u_cameraPos');
 
   u_Sampler0 = gl.getUniformLocation(gl.program, 'u_Sampler0');
   u_Sampler1 = gl.getUniformLocation(gl.program, 'u_Sampler1');
@@ -117,6 +158,12 @@ function connectVariablesToGLSL() {
 
 // 绑定事件
 function addActionForHtmlUI() {
+
+  document.getElementById('lightSlide X').addEventListener('mousemove', function(ev) {if(ev.buttons == 1) { g_lightPos[0] = this.value/100; renderAllShapes();}});
+  document.getElementById('lightSlide Y').addEventListener('mousemove', function(ev) {if(ev.buttons == 1) { g_lightPos[1] = this.value/100; renderAllShapes();}});
+  document.getElementById('lightSlide Z').addEventListener('mousemove', function(ev) {if(ev.buttons == 1) { g_lightPos[2] = this.value/100; renderAllShapes();}});
+
+
   // 示例：若有摄像机旋转滑块
   let angleSlider = document.getElementById('cameraRotateSlider');
   if (angleSlider) {
@@ -144,6 +191,7 @@ function addActionForHtmlUI() {
   canvas.addEventListener("mouseup", function () {
     g_mouseDragging = false;
   });
+
 }
 
 // 切换法线可视化
@@ -242,16 +290,16 @@ function drawFloor() {
 // 绘制天空盒
 function drawSky() {
   let sky = new Cube();
-  sky.textureNum = g_showNormal ? -3 : 3; // -3=法线可视化, 3=sky2.jpg
-  sky.matrix.scale(-20, -20, -20);
+  sky.textureNum = g_showNormal ? -3 : -2; // -3=法线可视化, 3=sky2.jpg
+  sky.matrix.scale(-10, -20, -20);
   sky.matrix.translate(-0.5, -0.5, -0.5);
   sky.render();
 }
 
 function drawCenterCube() {
   let cube = new Cube();
-  cube.color = [1.0, 0.5, 0.5, 1.0];
-  cube.textureNum = g_showNormal ? -3 : 2;
+  cube.color = [1, 0.6, 0.3, 0];
+  cube.textureNum = g_showNormal ? -3 : -2;
   cube.matrix.translate(0, -0.2, -3);
   cube.matrix.setTranslate(0, 0, -1);
   cube.matrix.scale(1, 1, 1);
@@ -267,6 +315,16 @@ function drawCenterSphere() {
   sphere.render();
 }
 
+function drawLight() {
+  var light = new Cube();
+  light.color = [1, 1, 0, 1];
+  light.textureNum = -2;
+  light.matrix.translate(g_lightPos[0], g_lightPos[1], g_lightPos[2]);
+  light.matrix.scale(-.1, -.1, -.1);
+  light.matrix.translate(-0.5, -0.5, -0.5);
+  light.render();
+}
+
 function renderScene() {
   let identity = new Matrix4();
   gl.uniformMatrix4fv(u_GlobalRotateMatrix, false, identity.elements);
@@ -275,16 +333,13 @@ function renderScene() {
 
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-  // 先画地板
-  drawFloor();
-  
-  // 画中心正方体
-  drawCenterCube();
+  gl.uniform3f(u_LightPos, g_lightPos[0], g_lightPos[1], g_lightPos[2]);
+  gl.uniform3f(u_cameraPos, camera.eye.x, camera.eye.y, camera.eye.z);
 
-  // 画中心球体
+  drawFloor();
+  drawLight();
+  drawCenterCube();
   drawCenterSphere();
-  
-  // 画天空盒（应该放最后，以防止其他物体被覆盖）
   drawSky();
 }
 
@@ -293,13 +348,32 @@ function renderScene() {
 function tick() {
   let now = performance.now();
   let dt = now - lastFrameTime;
+  let g_seconds = (performance.now() / 1000) % 360;
   lastFrameTime = now;
   let fps = 1000 / dt;
   document.getElementById("numdot").innerText = "FPS: " + fps.toFixed(1);
 
+  updateAnimationAngles();
   renderScene();
   requestAnimationFrame(tick);
 }
+
+function updateAnimationAngles() {
+  let time = performance.now() / 1000; // 获取当前时间（秒）
+  
+  if (g_yellowAnimation) {
+    g_yellowAngle = 45 * Math.sin(time);
+  }
+  if (g_megentaAnimation) {
+    g_megentaAngle = 45 * Math.sin(3 * time);
+  }
+
+  // 让光源围绕 (0,1,-2) 旋转
+  let radius = 2.15;  // 旋转半径
+  g_lightPos[0] = Math.cos(time) * radius;
+  g_lightPos[2] = Math.sin(time) * radius - 2; // 保持在 -2 附近
+}
+
 
 // 主函数
 function main() {

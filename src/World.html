@@ -14,8 +14,15 @@
     <div class="controls">
       <input type="range" id="cameraRotateSlider" min="0" max="360" value="0">
       <label for="cameraRotateSlider">Camera Rotation</label>
+      <p>
       <button onclick="toggleNormal()">Enable/Disable Normals</button>
-
+      <p>
+      Light X <input type="range" min = "-250" max = "250" value = "0" class="slider" id="lightSlide X">
+      Light Y <input type="range" min = "-250" max = "250" value = "100" class="slider" id="lightSlide Y">
+      Light Z <input type="range" min = "-250" max = "250" value = "-200" class="slider" id="lightSlide Z">
+      <p>
+      <button id="toggleLight">Light On/Off</button>
+      <p>
       <h2>How to Controls</h2>
       <ul>
         <li><span class="highlight">W A S D</span> - Move camera (Forward, Backward, Left, Right)</li>
