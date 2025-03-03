@@ -29,6 +29,7 @@ var FSHADER_SOURCE = `
 
   uniform vec4 u_FragColor;
   uniform vec3 u_cameraPos;
+  uniform vec3 u_LightColor;
   uniform sampler2D u_Sampler0;
   uniform sampler2D u_Sampler1;
   uniform sampler2D u_Sampler2;
@@ -66,6 +67,11 @@ var FSHADER_SOURCE = `
       gl_FragColor = vec4(1.0, 0.2, 0.2, 1.0);
     }
 
+    if (!u_lightOn) { 
+      gl_FragColor = vec4(vec3(gl_FragColor) * 0.2, 1.0);
+      return;
+    }
+    
     vec3 lightVector =u_LightPos - vec3(v_VertPos);
     float r=length(lightVector);
 
@@ -84,7 +90,8 @@ var FSHADER_SOURCE = `
     float specular = pow(max(dot(E, R), 0.0), 50.0) * 0.8;
     
 
-    vec3 lightColor = vec3(1.0, 0.8, 0.6);
+    vec3 lightColor = u_LightColor; 
+
 
     vec3 diffuse = lightColor * nDotL * 0.7;
     vec3 ambient = vec3(gl_FragColor) * 0.2;
@@ -110,10 +117,16 @@ let lastFrameTime = performance.now();
 const MOUSE_SENSITIVITY = 0.002;
 
 let g_lightPos = [0, 1, -2]; // 光源位置
+let g_lightOn = true;
 let u_cameraPos;
 
 let g_yellowAnimation = false;
 let g_megentaAnimation = false;
+let g_lightAnimation = false; // 控制灯光动画
+
+
+let g_lightColor = [1.0, 0.8, 0.6];
+let u_LightColor;
 
 // 初始化 WebGL
 function setupWebGL() {
@@ -145,6 +158,8 @@ function connectVariablesToGLSL() {
   u_whichTexture = gl.getUniformLocation(gl.program, 'u_whichTexture');
   u_LightPos = gl.getUniformLocation(gl.program, 'u_LightPos');
   u_cameraPos = gl.getUniformLocation(gl.program, 'u_cameraPos');
+  u_lightOn = gl.getUniformLocation(gl.program, 'u_lightOn');
+  u_LightColor = gl.getUniformLocation(gl.program, 'u_LightColor');
 
   u_Sampler0 = gl.getUniformLocation(gl.program, 'u_Sampler0');
   u_Sampler1 = gl.getUniformLocation(gl.program, 'u_Sampler1');
@@ -154,6 +169,9 @@ function connectVariablesToGLSL() {
 
   let identityM = new Matrix4();
   gl.uniformMatrix4fv(u_ModelMatrix, false, identityM.elements);
+
+  gl.uniform1i(u_lightOn, g_lightOn ? 1 : 0);
+  gl.uniform3f(u_LightColor, g_lightColor[0], g_lightColor[1], g_lightColor[2]);
 }
 
 // 绑定事件
@@ -163,6 +181,14 @@ function addActionForHtmlUI() {
   document.getElementById('lightSlide Y').addEventListener('mousemove', function(ev) {if(ev.buttons == 1) { g_lightPos[1] = this.value/100; renderAllShapes();}});
   document.getElementById('lightSlide Z').addEventListener('mousemove', function(ev) {if(ev.buttons == 1) { g_lightPos[2] = this.value/100; renderAllShapes();}});
 
+  document.getElementById('lightOn').onclick = function() {g_lightOn = true; renderScene();};
+  document.getElementById('lightOff').onclick = function() {g_lightOn = false; renderScene();};
+
+  document.getElementById('lightColorR').addEventListener('input', function(ev) {g_lightColor[0] = this.value / 100; renderScene();});
+  document.getElementById('lightColorG').addEventListener('input', function(ev) {g_lightColor[1] = this.value / 100; renderScene();});
+  document.getElementById('lightColorB').addEventListener('input', function(ev) {g_lightColor[2] = this.value / 100; renderScene();});
+
+  document.getElementById('toggleLightAnimation').onclick = function() {g_lightAnimation = !g_lightAnimation; this.innerText = g_lightAnimation ? "Disable Light Animation" : "Enable Light Animation";};
 
   // 示例：若有摄像机旋转滑块
   let angleSlider = document.getElementById('cameraRotateSlider');
@@ -334,7 +360,9 @@ function renderScene() {
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
   gl.uniform3f(u_LightPos, g_lightPos[0], g_lightPos[1], g_lightPos[2]);
+  gl.uniform3f(u_LightColor, g_lightColor[0], g_lightColor[1], g_lightColor[2]);
   gl.uniform3f(u_cameraPos, camera.eye.x, camera.eye.y, camera.eye.z);
+  gl.uniform1i(u_lightOn, g_lightOn ? 1 : 0);
 
   drawFloor();
   drawLight();
@@ -360,19 +388,22 @@ function tick() {
 
 function updateAnimationAngles() {
   let time = performance.now() / 1000; // 获取当前时间（秒）
-  
+
   if (g_yellowAnimation) {
-    g_yellowAngle = 45 * Math.sin(time);
+      g_yellowAngle = 45 * Math.sin(time);
   }
   if (g_megentaAnimation) {
-    g_megentaAngle = 45 * Math.sin(3 * time);
+      g_megentaAngle = 45 * Math.sin(3 * time);
   }
 
-  // 让光源围绕 (0,1,-2) 旋转
-  let radius = 2.15;  // 旋转半径
-  g_lightPos[0] = Math.cos(time) * radius;
-  g_lightPos[2] = Math.sin(time) * radius - 2; // 保持在 -2 附近
+
+  if (g_lightAnimation) {
+      let radius = 2.15;  // 旋转半径
+      g_lightPos[0] = Math.cos(time) * radius;
+      g_lightPos[2] = Math.sin(time) * radius - 2; // 保持在 -2 附近
+  }
 }
+
 
 
 // 主函数
