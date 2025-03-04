@@ -375,7 +375,7 @@ function renderFishBody(x, y, z) {
   for (let i = 0; i < fishHeights.length; i++) {
       let part = new Cube();
       part.color = fishColors[i] || [0.0, 0.5, 1.0, 1.0];
-      part.textureNum = -2;
+      part.textureNum = g_showNormal ? -3 : -2;  
   
       let currentHeight = fishHeights[i] * heightFactor;
       let xPos = startX + i * (baseWidth + gap) + baseWidth / 2;
@@ -417,7 +417,7 @@ function renderFishBody(x, y, z) {
           leftEye.matrix.rotate(swingAngle, 0, 1, 0);
           leftEye.matrix.translate(-(centerX - eyeX), 0, 0);
           leftEye.matrix.scale(eyeSize, eyeSize, eyeSize * 0.5);
-          leftEye.textureNum = -2;
+          leftEye.textureNum = g_showNormal ? -3 : -2;
           leftEye.render();
   
           rightEye.matrix = new Matrix4(fishMatrix);
@@ -426,7 +426,7 @@ function renderFishBody(x, y, z) {
           rightEye.matrix.rotate(swingAngle, 0, 1, 0);
           rightEye.matrix.translate(-(centerX - eyeX), 0, 0);
           rightEye.matrix.scale(eyeSize, eyeSize, eyeSize * 0.5);
-          rightEye.textureNum = -2;
+          rightEye.textureNum = g_showNormal ? -3 : -2;
           rightEye.render();
       }
   }
