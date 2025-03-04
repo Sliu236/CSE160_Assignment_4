@@ -95,7 +95,7 @@ var FSHADER_SOURCE = `
 
     vec3 diffuse = lightColor * nDotL * 0.7;
     vec3 ambient = vec3(gl_FragColor) * 0.2;
-    vec3 specularColor = lightColor * specular * 1.5;
+    vec3 specularColor = lightColor * specular * 2.0;
     gl_FragColor = vec4(diffuse + ambient + specularColor, 1.0);
   }
 `;
@@ -127,6 +127,15 @@ let g_lightAnimation = false; // 控制灯光动画
 
 let g_lightColor = [1.0, 0.8, 0.6];
 let u_LightColor;
+
+
+let g_fishMoving = false;
+let g_fishPosX = 0.0;
+let g_fishPosY = 0.0;
+let g_bodyBendAngle = 0.0;
+let g_headSwing = 0.0;
+let g_tailSwing = 0.0;
+let g_fishAnimation = false;
 
 // 初始化 WebGL
 function setupWebGL() {
@@ -316,7 +325,7 @@ function drawFloor() {
 // 绘制天空盒
 function drawSky() {
   let sky = new Cube();
-  sky.textureNum = g_showNormal ? -3 : -2; // -3=法线可视化, 3=sky2.jpg
+  sky.textureNum = g_showNormal ? -3 : 3; // -3=法线可视化, 3=sky2.jpg
   sky.matrix.scale(-10, -20, -20);
   sky.matrix.translate(-0.5, -0.5, -0.5);
   sky.render();
@@ -351,6 +360,92 @@ function drawLight() {
   light.render();
 }
 
+
+function renderFishBody(x, y, z) {
+  let fishMatrix = new Matrix4();
+  fishMatrix.setTranslate(x, y, z);  // 直接使用传入的位置
+  fishMatrix.scale(4, 4, 5);  // 统一缩放，保持鱼的大小
+
+  let fishHeights = [1, 2, 2.5, 3.5, 5.2, 4.3, 3.5, 2.5, 4.0, 5];
+  let fishColors = [
+      [1.0, 0.5, 0.0, 1.0], [1.0, 0.5, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0],
+      [1.0, 0.5, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0],
+      [1.0, 0.5, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0], [1.0, 0.5, 0.0, 1.0],
+      [0.0, 0.0, 0.0, 1.0]
+  ];
+  
+  let baseWidth = 0.08, baseDepth = 0.1, heightFactor = 0.1;
+  let eyeSize = 0.05, eyeOffsetZ = baseDepth / 2;
+  let gap = 0.01, totalWidth = fishHeights.length * (baseWidth + gap);
+  let startX = -totalWidth / 2;
+  let yOffsets = [0, -0.1, -0.15, -0.25, -0.38, -0.30, -0.25, -0.15, -0.3, -0.4];
+  let centerX = startX + 4 * (baseWidth + gap) + baseWidth / 2;
+  let decayFactor = 0.6;
+  
+  for (let i = 0; i < fishHeights.length; i++) {
+      let part = new Cube();
+      part.color = fishColors[i] || [0.0, 0.5, 1.0, 1.0];
+      part.textureNum = -2;
+  
+      let currentHeight = fishHeights[i] * heightFactor;
+      let xPos = startX + i * (baseWidth + gap) + baseWidth / 2;
+      let yPos = (g_bodyBendAngle > 0) ? yOffsets[4] + fishHeights[4] * heightFactor - currentHeight + 0.3 :
+                 (g_bodyBendAngle < 0) ? yOffsets[4] + 0.2 :
+                 yOffsets[i] + currentHeight / 2;
+  
+      part.matrix = new Matrix4(fishMatrix);
+      part.matrix.translate(xPos, yPos, 0);
+
+      // 头部和尾部摆动
+      if (i < 5) {
+          let swingAngle = g_headSwing * Math.pow(decayFactor, i);
+          part.matrix.translate(centerX - xPos, 0, 0);
+          part.matrix.rotate(swingAngle, 0, 1, 0);
+          part.matrix.translate(-(centerX - xPos), 0, 0);
+      }
+      if (i > 4) {
+          let swingAngle = -g_tailSwing * Math.pow(decayFactor, 9 - i);
+          part.matrix.translate(centerX - xPos, 0, 0);
+          part.matrix.rotate(swingAngle, 0, 1, 0);
+          part.matrix.translate(-(centerX - xPos), 0, 0);
+      }
+    
+      part.matrix.scale(baseWidth, currentHeight, baseDepth);
+      part.render();
+
+      // 眼睛
+      if (i === 1) {
+          let leftEye = new Cube(), rightEye = new Cube();
+          leftEye.color = [0.0, 0.0, 0.0, 1.0];
+          rightEye.color = [0.0, 0.0, 0.0, 1.0];
+  
+          let eyeX = xPos, eyeY = yPos + 0.07;
+          let eyeZFront = eyeOffsetZ + 0.04, eyeZBack = -eyeOffsetZ + 0.03;
+          let swingAngle = g_headSwing * Math.pow(decayFactor, 1);
+  
+          leftEye.matrix = new Matrix4(fishMatrix);
+          leftEye.matrix.translate(eyeX, eyeY, eyeZFront);
+          leftEye.matrix.translate(centerX - eyeX, 0, 0);
+          leftEye.matrix.rotate(swingAngle, 0, 1, 0);
+          leftEye.matrix.translate(-(centerX - eyeX), 0, 0);
+          leftEye.matrix.scale(eyeSize, eyeSize, eyeSize * 0.5);
+          leftEye.textureNum = -2;
+          leftEye.render();
+  
+          rightEye.matrix = new Matrix4(fishMatrix);
+          rightEye.matrix.translate(eyeX, eyeY, eyeZBack);
+          rightEye.matrix.translate(centerX - eyeX, 0, 0);
+          rightEye.matrix.rotate(swingAngle, 0, 1, 0);
+          rightEye.matrix.translate(-(centerX - eyeX), 0, 0);
+          rightEye.matrix.scale(eyeSize, eyeSize, eyeSize * 0.5);
+          rightEye.textureNum = -2;
+          rightEye.render();
+      }
+  }
+}
+
+
+
 function renderScene() {
   let identity = new Matrix4();
   gl.uniformMatrix4fv(u_GlobalRotateMatrix, false, identity.elements);
@@ -366,8 +461,13 @@ function renderScene() {
 
   drawFloor();
   drawLight();
+
+  renderFishBody(0, 2, -0.5);  // 让鱼出现在 (x=0, y=1, z=-3)
+  
   drawCenterCube();
+
   drawCenterSphere();
+
   drawSky();
 }
 
@@ -380,6 +480,9 @@ function tick() {
   lastFrameTime = now;
   let fps = 1000 / dt;
   document.getElementById("numdot").innerText = "FPS: " + fps.toFixed(1);
+
+  let fishX = Math.sin(performance.now() / 1000) * 2; // 让鱼左右摆动
+  renderFishBody(fishX, 1, -3);
 
   updateAnimationAngles();
   renderScene();
