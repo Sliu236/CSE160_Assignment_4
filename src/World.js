@@ -1,4 +1,3 @@
-// 顶点着色器
 var VSHADER_SOURCE = `
   precision mediump float;
   attribute vec4 a_Position;
@@ -16,12 +15,11 @@ var VSHADER_SOURCE = `
   void main() {
     gl_Position = u_ProjectionMatrix * u_ViewMatrix * u_GlobalRotateMatrix * u_ModelMatrix * a_Position;
     v_UV = a_UV;
-    v_Normal = a_Normal;
+    v_Normal = normalize(a_Normal); 
     v_VertPos = u_ModelMatrix * a_Position;
   }
 `;
 
-// 片元着色器
 var FSHADER_SOURCE = `
   precision mediump float;
   varying vec2 v_UV;
@@ -40,17 +38,16 @@ var FSHADER_SOURCE = `
   varying vec4 v_VertPos;
   uniform bool u_lightOn;
   
+  uniform vec3 u_SpotlightDir;    
+  uniform float u_SpotlightCutoff;     
+  uniform float u_SpotlightOuterCutoff; 
 
   void main() {
     if (u_whichTexture == -2) {
-      // 固定颜色模式
       gl_FragColor = u_FragColor;
     } else if (u_whichTexture == -3) {
-      // 法线可视化模式
-      // 这里用 vec4(v_Normal, 1.0) 或 vec4((v_Normal+1.0)/2.0, 1.0) 都行
       gl_FragColor = vec4((normalize(v_Normal) + 1.0) / 2.0, 1.0);
     } else if (u_whichTexture == -1) {
-      // UV 可视化
       gl_FragColor = vec4(v_UV, 1.0, 1.0);
     } else if (u_whichTexture == 0) {
       gl_FragColor = texture2D(u_Sampler0, v_UV);
@@ -63,7 +60,6 @@ var FSHADER_SOURCE = `
     } else if (u_whichTexture == 4) {
       gl_FragColor = texture2D(u_Sampler4, v_UV);
     } else {
-      // 默认红色
       gl_FragColor = vec4(1.0, 0.2, 0.2, 1.0);
     }
 
@@ -72,31 +68,27 @@ var FSHADER_SOURCE = `
       return;
     }
     
-    vec3 lightVector =u_LightPos - vec3(v_VertPos);
-    float r=length(lightVector);
+  //Spot light
+  vec3 lightDir = normalize(u_LightPos - vec3(v_VertPos));
+  vec3 spotDir = normalize(u_SpotlightDir);
 
-    // N dot L
-    vec3 L = normalize(lightVector);
-    vec3 N = normalize(v_Normal);
-    float nDotL = max(dot(N, L), 0.0);
+  float theta = dot(lightDir, -spotDir);
+  float epsilon = u_SpotlightCutoff - u_SpotlightOuterCutoff;
+  float intensity = clamp((theta - u_SpotlightOuterCutoff) / epsilon, 0.0, 1.0);
 
-    // Reflection
-    vec3 R = reflect(-L, N);
+  vec3 N = normalize(v_Normal);
+  float nDotL = max(dot(N, lightDir), 0.0); 
 
-    // eye
-    vec3 E = normalize(u_cameraPos-vec3(v_VertPos));
-
-    // specular
-    float specular = pow(max(dot(E, R), 0.0), 50.0) * 0.8;
-    
-
-    vec3 lightColor = u_LightColor; 
+  vec3 R = reflect(-lightDir, N);
+  vec3 E = normalize(u_cameraPos - vec3(v_VertPos));
+  float specular = pow(max(dot(E, R), 0.0), 200.0) * 0.8;
 
 
-    vec3 diffuse = lightColor * nDotL * 0.7;
-    vec3 ambient = vec3(gl_FragColor) * 0.2;
-    vec3 specularColor = lightColor * specular * 2.0;
-    gl_FragColor = vec4(diffuse + ambient + specularColor, 1.0);
+  vec3 ambient = vec3(gl_FragColor) * 0.2;
+  vec3 diffuse = u_LightColor * nDotL * 0.7 * intensity;
+  vec3 specularColor = u_LightColor * specular * 4.0 * intensity;
+
+  gl_FragColor = vec4(diffuse + ambient + specularColor, 1.0);
   }
 `;
 
@@ -108,7 +100,7 @@ let u_Sampler0, u_Sampler1, u_Sampler2, u_Sampler3, u_Sampler4;
 
 
 let camera;
-let g_showNormal = false;  // 是否开启法线可视化
+let g_showNormal = false;  
 let g_mouseDragging = false;
 let g_lastMouseX = 0;
 let g_lastMouseY = 0;
@@ -116,18 +108,21 @@ let g_lastMouseY = 0;
 let lastFrameTime = performance.now();
 const MOUSE_SENSITIVITY = 0.002;
 
-let g_lightPos = [0, 1, -2]; // 光源位置
+let g_lightPos = [0, 5, -2]; 
 let g_lightOn = true;
 let u_cameraPos;
 
 let g_yellowAnimation = false;
 let g_megentaAnimation = false;
-let g_lightAnimation = false; // 控制灯光动画
+let g_lightAnimation = false; 
 
 
 let g_lightColor = [1.0, 0.8, 0.6];
 let u_LightColor;
 
+let g_spotlightDir = [0, -1, 0]; 
+let g_spotlightCutoff = Math.cos(30 * Math.PI/180); 
+let g_spotlightOuterCutoff = Math.cos(45 * Math.PI/180); 
 
 let g_fishMoving = false;
 let g_fishPosX = 0.0;
@@ -137,7 +132,6 @@ let g_headSwing = 0.0;
 let g_tailSwing = 0.0;
 let g_fishAnimation = false;
 
-// 初始化 WebGL
 function setupWebGL() {
   canvas = document.getElementById('webgl');
   gl = canvas.getContext('webgl', { preserveDrawingBuffer: true });
@@ -148,7 +142,6 @@ function setupWebGL() {
   gl.enable(gl.DEPTH_TEST);
 }
 
-// 初始化着色器变量
 function connectVariablesToGLSL() {
   if (!initShaders(gl, VSHADER_SOURCE, FSHADER_SOURCE)) {
     console.log('Failed to initialize shaders.');
@@ -170,6 +163,11 @@ function connectVariablesToGLSL() {
   u_lightOn = gl.getUniformLocation(gl.program, 'u_lightOn');
   u_LightColor = gl.getUniformLocation(gl.program, 'u_LightColor');
 
+
+  u_SpotlightDir = gl.getUniformLocation(gl.program, 'u_SpotlightDir');
+  u_SpotlightCutoff = gl.getUniformLocation(gl.program, 'u_SpotlightCutoff');
+  u_SpotlightOuterCutoff = gl.getUniformLocation(gl.program, 'u_SpotlightOuterCutoff');
+
   u_Sampler0 = gl.getUniformLocation(gl.program, 'u_Sampler0');
   u_Sampler1 = gl.getUniformLocation(gl.program, 'u_Sampler1');
   u_Sampler2 = gl.getUniformLocation(gl.program, 'u_Sampler2');
@@ -183,7 +181,6 @@ function connectVariablesToGLSL() {
   gl.uniform3f(u_LightColor, g_lightColor[0], g_lightColor[1], g_lightColor[2]);
 }
 
-// 绑定事件
 function addActionForHtmlUI() {
 
   document.getElementById('lightSlide X').addEventListener('mousemove', function(ev) {if(ev.buttons == 1) { g_lightPos[0] = this.value/100; renderAllShapes();}});
@@ -199,7 +196,10 @@ function addActionForHtmlUI() {
 
   document.getElementById('toggleLightAnimation').onclick = function() {g_lightAnimation = !g_lightAnimation; this.innerText = g_lightAnimation ? "Disable Light Animation" : "Enable Light Animation";};
 
-  // 示例：若有摄像机旋转滑块
+
+  document.getElementById('spotlightCutoff').addEventListener('input', function () {let angle = parseFloat(this.value); g_spotlightCutoff = Math.cos(angle * Math.PI / 180); document.getElementById('cutoffValue').innerText = angle; renderScene();});
+  document.getElementById('spotlightOuterCutoff').addEventListener('input', function () {let angle = parseFloat(this.value); g_spotlightOuterCutoff = Math.cos(angle * Math.PI / 180); document.getElementById('outerCutoffValue').innerText = angle; renderScene();});
+
   let angleSlider = document.getElementById('cameraRotateSlider');
   if (angleSlider) {
     angleSlider.addEventListener('input', function () {
@@ -209,7 +209,6 @@ function addActionForHtmlUI() {
     });
   }
 
-  // 监听鼠标拖拽
   canvas.addEventListener("mousedown", function (ev) {
     g_mouseDragging = true;
     g_lastMouseX = ev.clientX;
@@ -229,14 +228,12 @@ function addActionForHtmlUI() {
 
 }
 
-// 切换法线可视化
 function toggleNormal() {
   g_showNormal = !g_showNormal;
   console.log("Normal mode:", g_showNormal);
   renderScene();
 }
 
-// 摄像机移动相关
 function setupPointerLock() {
   canvas.addEventListener("click", function () {
     canvas.requestPointerLock();
@@ -259,7 +256,6 @@ function setupPointerLock() {
   });
 }
 
-// 初始化纹理
 function initTextures() {
   let image0 = new Image();
   let image3 = new Image();
@@ -273,14 +269,12 @@ function initTextures() {
   image3.onload = function() { sendTextureToGLSL(image3, gl.TEXTURE3, u_Sampler3); };
   image4.onload = function() { sendTextureToGLSL(image4, gl.TEXTURE4, u_Sampler4); };
 
-  // 示例：0=brick, 3=sky2, 4=grass2
   image0.src = 'brick.webp';
   image3.src = 'sky2.jpg';
   image4.src = 'grass2.jpg';
   return true;
 }
 
-// 将纹理传给 GLSL
 function sendTextureToGLSL(image, texUnit, samplerUniform) {
   let texture = gl.createTexture();
   if (!texture) {
@@ -300,7 +294,6 @@ function sendTextureToGLSL(image, texUnit, samplerUniform) {
   console.log("Texture loaded into unit", texUnit - gl.TEXTURE0);
 }
 
-// 处理键盘事件
 function keydown(ev) {
   if (camera.handleKeyDown(ev.key)) {
     renderScene();
@@ -310,22 +303,19 @@ function keydown(ev) {
 }
 document.onkeydown = keydown;
 
-// =============== 仅保留 Floor & Sky ===============
 
-// 绘制地板
 function drawFloor() {
   let floor = new Cube();
-  floor.textureNum = 4; // grass2.jpg (示例)
+  floor.textureNum = 4; 
   floor.matrix.translate(0, -0.75, 0);
   floor.matrix.scale(32, 0, 32);
   floor.matrix.translate(-0.5, 0, -0.5);
   floor.render();
 }
 
-// 绘制天空盒
 function drawSky() {
   let sky = new Cube();
-  sky.textureNum = g_showNormal ? -3 : 3; // -3=法线可视化, 3=sky2.jpg
+  sky.textureNum = g_showNormal ? -3 : 3; 
   sky.matrix.scale(-10, -20, -20);
   sky.matrix.translate(-0.5, -0.5, -0.5);
   sky.render();
@@ -363,8 +353,8 @@ function drawLight() {
 
 function renderFishBody(x, y, z) {
   let fishMatrix = new Matrix4();
-  fishMatrix.setTranslate(x, y, z);  // 直接使用传入的位置
-  fishMatrix.scale(4, 4, 5);  // 统一缩放，保持鱼的大小
+  fishMatrix.setTranslate(x, y, z);  
+  fishMatrix.scale(4, 4, 5);  
 
   let fishHeights = [1, 2, 2.5, 3.5, 5.2, 4.3, 3.5, 2.5, 4.0, 5];
   let fishColors = [
@@ -396,7 +386,6 @@ function renderFishBody(x, y, z) {
       part.matrix = new Matrix4(fishMatrix);
       part.matrix.translate(xPos, yPos, 0);
 
-      // 头部和尾部摆动
       if (i < 5) {
           let swingAngle = g_headSwing * Math.pow(decayFactor, i);
           part.matrix.translate(centerX - xPos, 0, 0);
@@ -413,7 +402,6 @@ function renderFishBody(x, y, z) {
       part.matrix.scale(baseWidth, currentHeight, baseDepth);
       part.render();
 
-      // 眼睛
       if (i === 1) {
           let leftEye = new Cube(), rightEye = new Cube();
           leftEye.color = [0.0, 0.0, 0.0, 1.0];
@@ -454,6 +442,11 @@ function renderScene() {
 
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
+
+  gl.uniform3fv(u_SpotlightDir, g_spotlightDir);
+  gl.uniform1f(u_SpotlightCutoff, g_spotlightCutoff);
+  gl.uniform1f(u_SpotlightOuterCutoff, g_spotlightOuterCutoff);
+
   gl.uniform3f(u_LightPos, g_lightPos[0], g_lightPos[1], g_lightPos[2]);
   gl.uniform3f(u_LightColor, g_lightColor[0], g_lightColor[1], g_lightColor[2]);
   gl.uniform3f(u_cameraPos, camera.eye.x, camera.eye.y, camera.eye.z);
@@ -462,7 +455,7 @@ function renderScene() {
   drawFloor();
   drawLight();
 
-  renderFishBody(0, 2, -0.5);  // 让鱼出现在 (x=0, y=1, z=-3)
+  renderFishBody(0, 2, -0.5);  
   
   drawCenterCube();
 
@@ -472,7 +465,6 @@ function renderScene() {
 }
 
 
-// 动画循环
 function tick() {
   let now = performance.now();
   let dt = now - lastFrameTime;
@@ -481,7 +473,7 @@ function tick() {
   let fps = 1000 / dt;
   document.getElementById("numdot").innerText = "FPS: " + fps.toFixed(1);
 
-  let fishX = Math.sin(performance.now() / 1000) * 2; // 让鱼左右摆动
+  let fishX = Math.sin(performance.now() / 1000) * 2; 
   renderFishBody(fishX, 1, -3);
 
   updateAnimationAngles();
@@ -490,7 +482,7 @@ function tick() {
 }
 
 function updateAnimationAngles() {
-  let time = performance.now() / 1000; // 获取当前时间（秒）
+  let time = performance.now() / 1000; 
 
   if (g_yellowAnimation) {
       g_yellowAngle = 45 * Math.sin(time);
@@ -501,25 +493,22 @@ function updateAnimationAngles() {
 
 
   if (g_lightAnimation) {
-      let radius = 2.15;  // 旋转半径
+      let radius = 2.5;  
       g_lightPos[0] = Math.cos(time) * radius;
-      g_lightPos[2] = Math.sin(time) * radius - 2; // 保持在 -2 附近
+      g_lightPos[2] = Math.sin(time) * radius - 2; 
   }
 }
 
 
 
-// 主函数
 function main() {
   setupWebGL();
   connectVariablesToGLSL();
   addActionForHtmlUI();
   setupPointerLock();
 
-  // 创建摄像机
   camera = new Camera();
 
-  // 初始化纹理
   initTextures();
 
   gl.clearColor(0, 0, 0, 1.0);
